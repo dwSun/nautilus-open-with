@@ -1,0 +1,332 @@
+#!/usr/bin/python3
+import logging
+import os
+import shlex
+import subprocess
+from urllib.parse import unquote, urlparse
+
+from gi import require_version
+
+require_version("Nautilus", "4.1")
+
+from gi.repository import Gdk, GLib, GObject, Gtk, Nautilus
+
+if os.environ.get("NAUTILUS_DEBUG", "False") == "True":
+    logging.basicConfig(level=logging.DEBUG)
+
+
+class NautilusMenu(GObject.GObject, Nautilus.MenuProvider):
+    """统一的 Nautilus 右键菜单扩展类"""
+
+    _file_items_called = (
+        False  # 类级别标志，避免 get_file_items + get_background_items 重复
+    )
+
+    def __init__(self):
+        super().__init__()
+
+        self.display = Gdk.Display.get_default()
+        self.clipboard = self.display.get_clipboard()
+        self.primary_clipboard = self.display.get_primary_clipboard()
+        self.selected_files = {}
+
+        self.config = {
+            "items": {"path": True, "name": True, "content": True},
+            "selections": {"clipboard": True, "primary": True},
+            "shortcuts": {
+                "path": "<Ctrl><Shift>C",
+                "name": "<Ctrl><Shift>D",
+                "content": "<Ctrl><Shift>G",
+            },
+            "separator": ", ",
+            "escape_value_items": False,
+            "escape_value": False,
+            "name_ignore_extension": False,
+        }
+
+        self.allow_copy_content = [
+            "application/x-shellscript",
+            "application/json",
+        ]
+
+        app = Gtk.Application.get_default()
+        app.connect("window-added", self._window_added)
+        app.connect("window-removed", self._window_removed)
+
+    def _window_added(self, application, window):
+        for key, shortcut_str in self.config["shortcuts"].items():
+            if shortcut_str:
+                action = Gtk.CallbackAction.new(self._shortcuts_handler)
+                shortcut = Gtk.Shortcut.new(
+                    Gtk.ShortcutTrigger.parse_string(shortcut_str), action
+                )
+                shortcut.set_arguments(GLib.Variant.new_string(key))
+                window.add_shortcut(shortcut)
+
+    def _window_removed(self, application, window):
+        window_id = window.get_id()
+        if window_id in self.selected_files:
+            del self.selected_files[window_id]
+
+    def _shortcuts_handler(self, window, key):
+        action = GLib.Variant.get_string(key)
+        window_id = window.get_id()
+        action_function = {
+            "path": self._copy_paths,
+            "name": self._copy_names,
+            "content": self._copy_content,
+        }[action]
+        if len(self.selected_files[window_id]) > 0 and action_function:
+            action_function(None, self.selected_files[window_id])
+
+    def get_file_items(self, *args):
+        files = args[-1]
+        # 空白处右键时 Nautilus 会先调用 get_file_items([])，
+        # 实际菜单由 get_background_items(当前目录) 提供。
+        if not files:
+            return []
+
+        NautilusMenu._file_items_called = True
+
+        app = Gtk.Application.get_default()
+        window = app.get_active_window()
+        self.selected_files[window.get_id()] = files
+
+        return self._build_menu_items(files)
+
+    def get_background_items(self, *args):
+        if NautilusMenu._file_items_called:
+            NautilusMenu._file_items_called = False
+            return []
+        NautilusMenu._file_items_called = False
+
+        file = args[-1]
+
+        app = Gtk.Application.get_default()
+        window = app.get_active_window()
+        if window:
+            self.selected_files[window.get_id()] = [file]
+
+        return self._build_menu_items([file])
+
+    def _build_menu_items(self, files):
+        items = []
+
+        # ---------- Open in... 子菜单 ----------
+        edit_menu = Nautilus.Menu()
+        edit_parent = Nautilus.MenuItem(
+            name="NautilusMenu::OpenIn",
+            label="Open in...",
+        )
+        edit_parent.set_submenu(edit_menu)
+
+        self._add_editor_items(edit_menu, files)
+        items.append(edit_parent)
+
+        # ---------- Copy 子菜单 ----------
+        copy_parent = Nautilus.MenuItem(
+            name="NautilusMenu::Copy",
+            label="Copy ...",
+        )
+        copy_menu = Nautilus.Menu()
+        copy_parent.set_submenu(copy_menu)
+
+        plural = len(files) > 1
+        filtered_files = [
+            f
+            for f in files
+            if f.get_mime_type() in self.allow_copy_content
+            or f.get_mime_type().startswith("text/")
+        ]
+
+        if plural:
+            if self.config["items"]["path"]:
+                p = Nautilus.MenuItem(
+                    name="NautilusMenu::CopyFullName", label="Copy Full Names"
+                )
+                p.connect("activate", self._copy_paths, files)
+                copy_menu.append_item(p)
+
+            if self.config["items"]["name"]:
+                n = Nautilus.MenuItem(
+                    name="NautilusMenu::CopyFileName", label="Copy File Names"
+                )
+                n.connect("activate", self._copy_names, files)
+                copy_menu.append_item(n)
+
+            if self.config["items"]["path"]:
+                d = Nautilus.MenuItem(
+                    name="NautilusMenu::CopyDirPath", label="Copy Dir Paths"
+                )
+                d.connect("activate", self._copy_dirpaths, files)
+                copy_menu.append_item(d)
+
+            if self.config["items"]["content"] and filtered_files:
+                c = Nautilus.MenuItem(
+                    name="NautilusMenu::CopyContents", label="Copy Contents"
+                )
+                c.connect("activate", self._copy_content, filtered_files)
+                copy_menu.append_item(c)
+        else:
+            if len(files) == 0:
+                return items
+
+            if self.config["items"]["path"]:
+                p = Nautilus.MenuItem(
+                    name="NautilusMenu::CopyFullName", label="Copy Full Name"
+                )
+                p.connect("activate", self._copy_paths, files)
+                copy_menu.append_item(p)
+
+            if self.config["items"]["name"]:
+                n = Nautilus.MenuItem(
+                    name="NautilusMenu::CopyFileName", label="Copy File Name"
+                )
+                n.connect("activate", self._copy_names, files)
+                copy_menu.append_item(n)
+
+            if self.config["items"]["path"]:
+                d = Nautilus.MenuItem(
+                    name="NautilusMenu::CopyDirPath", label="Copy Dir Path"
+                )
+                d.connect("activate", self._copy_dirpaths, files)
+                copy_menu.append_item(d)
+
+            if self.config["items"]["content"] and filtered_files:
+                c = Nautilus.MenuItem(
+                    name="NautilusMenu::CopyContent", label="Copy Content"
+                )
+                c.connect("activate", self._copy_content, filtered_files)
+                copy_menu.append_item(c)
+
+        items.append(copy_parent)
+        return items
+
+    def _add_editor_items(self, menu, files):
+        if len(files) != 1:
+            return
+
+        fileinfo = files[0]
+        path = fileinfo.get_location().get_path()
+
+        # open_directory=True：右键文件时以所在目录为目标（Cursor/VSCode/gitg/Ghostty/Zap/gThumb）
+        # extra_args：额外命令行参数
+        # cwd_flag：通过命令行参数指定工作目录的标志/前缀；为 None 时把 target 作为位置参数传入。
+        #           - Ghostty 使用 --working-directory= 显式传入工作目录
+        #           - Zap 通过 zap://action/new_window?path=<dir> URL 触发源码里 Action::NewWindow 分支
+        #             （app/src/uri/mod.rs），强制开**新窗口**；如果改用 /new_tab，则会复用现有窗口加 tab。
+        # 注：Cursor / VSCode 在 extra_args 里加 "-n"（--new-window）以避开其"恢复上次窗口"行为，
+        #     否则会忽略命令行路径，继续恢复上次的 workspace（实测现象：不管右键哪个目录都打开同一个项目）。
+        editors = [
+            ("Cursor", "/usr/bin/cursor", "Edit in Cursor", True, ["-n"], None),
+            ("VSCode", "/usr/bin/code", "Edit in VSCode", True, ["-n"], None),
+            ("Zed", "/usr/bin/zeditor", "Edit in Zed", False, ["-n"], None),
+            ("gitg", "/usr/bin/gitg", "Open in gitg", True, [], None),
+            (
+                "Ghostty",
+                "/usr/bin/ghostty",
+                "Run in Ghostty",
+                True,
+                [],
+                "--working-directory=",
+            ),
+            (
+                "Zap",
+                "/usr/bin/zap-oss",
+                "Run in Zap",
+                True,
+                [],
+                "zap://action/new_window?path=",
+            ),
+            ("gThumb", "/usr/bin/gthumb", "View in gThumb", True, [], None),
+        ]
+
+        for name, cmd, label, open_directory, extra_args, cwd_flag in editors:
+            item = Nautilus.MenuItem(name=f"NautilusMenu::edit_{name}", label=label)
+            item.connect(
+                "activate",
+                self._run_editor,
+                cmd,
+                path,
+                open_directory,
+                extra_args,
+                cwd_flag,
+            )
+            menu.append_item(item)
+
+    def _run_editor(
+        self, menu, cmd, path, open_directory, extra_args=None, cwd_flag=None
+    ):
+        extra_args = extra_args or []
+        if open_directory:
+            target = path if os.path.isdir(path) else os.path.dirname(path)
+        else:
+            target = path
+
+        cwd = target if os.path.isdir(target) else os.path.dirname(target)
+
+        if cwd_flag:
+            # 通过命令行参数指定工作目录（如 Ghostty 的 --working-directory=/path）
+            subprocess.Popen([cmd] + extra_args + [f"{cwd_flag}{cwd}"], cwd=cwd)
+        else:
+            subprocess.Popen([cmd] + extra_args + [target], cwd=cwd)
+
+    def _get_file_abs_path(self, fileinfo):
+        return fileinfo.get_location().get_path()
+
+    def _copy_paths(self, menu, files):
+        paths = [
+            os.path.abspath(
+                os.path.join(
+                    urlparse(f.get_activation_uri()).netloc,
+                    unquote(urlparse(f.get_activation_uri()).path),
+                )
+            )
+            for f in files
+        ]
+        self._copy_value(paths)
+
+    def _copy_names(self, menu, files):
+        names = [
+            unquote(os.path.basename(urlparse(f.get_activation_uri()).path))
+            for f in files
+        ]
+        if self.config["name_ignore_extension"]:
+            names = [os.path.splitext(n)[0] for n in names]
+        self._copy_value(names)
+
+    def _copy_content(self, menu, files):
+        content = []
+        for f in files:
+            p = urlparse(f.get_activation_uri())
+            p = os.path.abspath(os.path.join(p.netloc, unquote(p.path)))
+            with open(p, "r") as fh:
+                content.append(fh.read())
+        self._copy_value(content)
+
+    def _copy_dirpaths(self, menu, files):
+        dirs = [
+            os.path.dirname(
+                os.path.abspath(
+                    os.path.join(
+                        urlparse(f.get_activation_uri()).netloc,
+                        unquote(urlparse(f.get_activation_uri()).path),
+                    )
+                )
+            )
+            for f in files
+        ]
+        self._copy_value(dirs)
+
+    def _copy_value(self, value):
+        if not value:
+            return
+        if self.config["escape_value_items"]:
+            value = [shlex.quote(v) for v in value]
+        text = self.config["separator"].join(value)
+        if self.config["escape_value"]:
+            text = shlex.quote(text)
+        if self.config["selections"]["clipboard"]:
+            self.clipboard.set(text)
+        if self.config["selections"]["primary"]:
+            self.primary_clipboard.set(text)
