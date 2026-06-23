@@ -5,6 +5,71 @@ import shlex
 import subprocess
 from urllib.parse import unquote, urlparse
 
+
+def _load_shell_env():
+    """加载 Fish shell 的环境变量，使通过 Nautilus 启动的程序能继承这些变量。
+
+    Nautilus 由 GNOME Session 启动，不经过 shell 的初始化流程，
+    因此 ~/.config/fish/config.fish 中设置的 PATH、GOPATH、ANDROID_HOME 等
+    环境变量不会传递给通过右键菜单启动的程序。
+    此函数在模块加载时运行一次，将 Fish login shell 的环境变量合并到当前进程。
+    """
+    try:
+        result = subprocess.run(
+            ["fish", "-l", "-c", "env"],
+            capture_output=True,
+            text=True,
+            timeout=5,
+        )
+        if result.returncode != 0:
+            logging.debug(
+                "fish -l -c env returned %d: %s",
+                result.returncode,
+                result.stderr.strip(),
+            )
+            return
+
+        # 需要跳过的 Fish 内部变量
+        skip_vars = {
+            "SHLVL",
+            "_",
+            "fish_pid",
+            "fish_killring",
+            "history",
+            "fish_user_paths",
+            "fish_function_path",
+            "fish_complete_path",
+        }
+
+        current_env = dict(os.environ)
+        loaded_count = 0
+        for line in result.stdout.splitlines():
+            if "=" not in line:
+                continue
+            key, _, value = line.partition("=")
+            if key in skip_vars or key.startswith("fish_"):
+                continue
+            # 只在当前环境没有该变量，或值不同时更新
+            if key not in current_env or current_env[key] != value:
+                os.environ[key] = value
+                loaded_count += 1
+                logging.debug("Loaded env from fish: %s=%s", key, value)
+
+        if loaded_count:
+            logging.info(
+                "Loaded %d environment variables from Fish shell", loaded_count
+            )
+    except FileNotFoundError:
+        logging.debug("fish not found, skipping shell env loading")
+    except subprocess.TimeoutExpired:
+        logging.debug("fish -l -c env timed out after 5s")
+    except OSError as e:
+        logging.debug("Failed to load fish env: %s", e)
+
+
+# 模块加载时立即加载 Fish shell 环境变量
+_load_shell_env()
+
 from gi import require_version
 
 require_version("Nautilus", "4.1")
