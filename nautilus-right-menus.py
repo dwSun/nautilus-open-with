@@ -274,12 +274,13 @@ class NautilusMenu(GObject.GObject, Nautilus.MenuProvider):
         fileinfo = files[0]
         path = fileinfo.get_location().get_path()
 
-        # open_directory=True：右键文件时以所在目录为目标（Cursor/VSCode/gitg/Ghostty/Zap/gThumb）
+        # open_directory=True：右键文件时以所在目录为目标（Cursor/VSCode/gitg/Ghostty/Warp/gThumb）
         # extra_args：额外命令行参数
         # cwd_flag：通过命令行参数指定工作目录的标志/前缀；为 None 时把 target 作为位置参数传入。
         #           - Ghostty 使用 --working-directory= 显式传入工作目录
-        #           - Zap 通过 zap://action/new_window?path=<dir> URL 触发源码里 Action::NewWindow 分支
-        #             （app/src/uri/mod.rs），强制开**新窗口**；如果改用 /new_tab，则会复用现有窗口加 tab。
+        #           - Warp 通过 warp://action/new_window?path=<dir> URL 触发其内置 URL handler
+        #             （系统 MIME x-scheme-handler/warp 已注册到 dev.warp.Warp.desktop），强制开**新窗口**；
+        #             如果改用 /new_tab，则会复用现有窗口加 tab。
         # 注：Cursor / VSCode 在 extra_args 里加 "-n"（--new-window）以避开其"恢复上次窗口"行为，
         #     否则会忽略命令行路径，继续恢复上次的 workspace（实测现象：不管右键哪个目录都打开同一个项目）。
         editors = [
@@ -296,12 +297,12 @@ class NautilusMenu(GObject.GObject, Nautilus.MenuProvider):
                 "--working-directory=",
             ),
             (
-                "Zap",
-                "/usr/bin/zap-oss",
-                "Run in Zap",
+                "Warp",
+                "/usr/bin/warp-terminal",
+                "Run in Warp",
                 True,
                 [],
-                "zap://action/new_window?path=",
+                "warp://action/new_window?path=",
             ),
             ("gThumb", "/usr/bin/gthumb", "View in gThumb", True, [], None),
         ]

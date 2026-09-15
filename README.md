@@ -35,11 +35,11 @@ nautilus -q && nautilus &
 | **Edit in Zed** | 同上 | `/usr/bin/zeditor -n`（文件→打开该文件） |
 | **Open in gitg** | 同上 | `/usr/bin/gitg` |
 | **Run in Ghostty** | 同上 | `/usr/bin/ghostty --working-directory=<路径>` |
-| **Run in Zap** | 同上 | `/usr/bin/zap-oss zap://action/new_window?path=<路径>` |
+| **Run in Warp** | 同上 | `/usr/bin/warp-terminal warp://action/new_window?path=<路径>` |
 | **View in gThumb** | 同上 | `/usr/bin/gthumb` |
 | **Copy Full Name / File Name / Dir Path / Content** 等 | 文件、文件夹、空白处（当前目录）；支持多选 | 无（写入剪贴板） |
 
-菜单文案按动作类型分四组：**Edit in**（代码编辑器：Cursor / VSCode / Zed）、**Run in**（终端/shell：Ghostty / Zap）、**Open in**（Git 仓库查看：gitg）、**View in**（图片查看：gThumb）。
+菜单文案按动作类型分四组：**Edit in**（代码编辑器：Cursor / VSCode / Zed）、**Run in**（终端/shell：Ghostty / Warp）、**Open in**（Git 仓库查看：gitg）、**View in**（图片查看：gThumb）。
 
 ---
 
@@ -54,7 +54,7 @@ nautilus -q && nautilus &
 
 | 扩展 | 右键选中「文件夹」 | 右键选中「文件」 | 空白处右键 |
 |------|------------------|----------------|------------|
-| Edit in Cursor / Edit in VSCode / Open in gitg / Run in Ghostty / Run in Zap / View in gThumb | 打开该目录 | 显示；打开**文件所在目录** | 打开当前目录 |
+| Edit in Cursor / Edit in VSCode / Open in gitg / Run in Ghostty / Run in Warp / View in gThumb | 打开该目录 | 显示；打开**文件所在目录** | 打开当前目录 |
 | Edit in Zed | 打开该目录 | 显示；打开**该文件**（cwd 为所在目录） | 打开当前目录 |
 
 **复制路径扩展：**
@@ -93,13 +93,14 @@ nautilus -q && nautilus &
 - Ghostty 不继承 `cwd`，需通过 `--working-directory` 参数显式指定工作目录。
 - 对文件右键时工作目录为**文件所在目录**。
 
-### 6. 在 Zap 中运行（Run in Zap）
+### 6. 在 Warp 中运行（Run in Warp）
 
-- 命令：`zap-oss zap://action/new_window?path=<目录路径>`
-- Zap 的 URL scheme 是 `zap`（Zap OSS 在 `crates/warp_core/src/channel/state.rs::url_scheme()` 定义）。源码 `app/src/uri/mod.rs::Action::parse` 识别 `/new_window` 路径，调用 `Action::handle` 时强制 `window_id = None`，从而 `open_file` 走 `root_view:open_new_from_path` 分支——**始终开新窗口**，不会复用现有窗口加 tab。
-- 如果想要"在现有窗口加 tab"的行为，把 URL 改成 `zap://action/new_tab?path=<dir>` 即可（`window_id` 变为 `primary_window_id`）。
-- 对文件右键时传 `zap://action/new_window?path=<文件路径>`，Zap 自动 fallback 到**文件所在目录**作为 session 工作目录。
-- `agent` 系列子命令（`agent run` 等）与本菜单无关，agent 是另一套功能。
+- 命令：`warp-terminal warp://action/new_window?path=<目录路径>`
+- Warp 终端的 URL scheme 是 `warp`（系统的 MIME `x-scheme-handler/warp` 默认注册到 `dev.warp.Warp.desktop`），Warp 启动器识别 `warp://action/new_window` 路径后**始终开新窗口**，不会复用现有窗口加 tab。
+- 如果想要“在现有窗口加 tab”的行为，把 URL 改成 `warp://action/new_tab?path=<dir>` 即可。
+- 对文件右键时传 `warp://action/new_window?path=<文件路径>`，Warp 会 fallback 到**文件所在目录**作为新窗口的工作目录。
+- `/usr/bin/warp-terminal` 是个 Bash wrapper，实际调用 `/opt/warpdotdev/warp-terminal/warp`。同一个二进制默认进入 Oz CLI 模式，但只要第一个参数是 `warp://` URL，就会被分派到 URL handler（走 GUI）；如果 Warp 以后调整了内部行为，只需修脚本里的 `editors` 列表那一行。
+- `warp agent ...` 子命令（`agent run` 等）与本菜单无关，那是另一套 Oz agent 功能。
 
 ### 7. 在 gThumb 中查看（View in gThumb）
 
@@ -142,8 +143,8 @@ nautilus -q && nautilus &
 检查命令是否在 PATH 或固定路径：
 
 ```bash
-which cursor code zeditor gitg ghostty zap-oss gthumb
-ls -l /usr/bin/cursor /usr/bin/code /usr/bin/zeditor /usr/bin/gitg /usr/bin/ghostty /usr/bin/zap-oss /usr/bin/gthumb
+which cursor code zeditor gitg ghostty warp-terminal gthumb
+ls -l /usr/bin/cursor /usr/bin/code /usr/bin/zeditor /usr/bin/gitg /usr/bin/ghostty /usr/bin/warp-terminal /usr/bin/gthumb
 ```
 
 若程序安装在其他位置（例如 `~/.local/bin/cursor`），需编辑脚本 `editors` 列表中对应的路径。
@@ -188,4 +189,4 @@ extensions/
 ## 改进备忘
 
 - [ ] 将硬编码的 `/usr/bin/...` 路径改为 `shutil.which()` 或配置文件，便于不同安装方式。
-- [x] 全部外部程序（Cursor / VSCode / Zed / gitg / Ghostty / Zap / gThumb）：支持右键文件，打开所在目录。
+- [x] 全部外部程序（Cursor / VSCode / Zed / gitg / Ghostty / Warp / gThumb）：支持右键文件，打开所在目录。
