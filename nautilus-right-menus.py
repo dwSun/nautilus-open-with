@@ -274,7 +274,7 @@ class NautilusMenu(GObject.GObject, Nautilus.MenuProvider):
         fileinfo = files[0]
         path = fileinfo.get_location().get_path()
 
-        # open_directory=True：右键文件时以所在目录为目标（Cursor/VSCode/gitg/Ghostty/Warp/gThumb）
+        # open_directory=True：右键文件时以所在目录为目标（Cursor/VSCode/gitg/Ghostty/Kitty/Warp/gThumb）
         # extra_args：额外命令行参数
         # cwd_flag：通过命令行参数指定工作目录的标志/前缀；为 None 时把 target 作为位置参数传入。
         #           - Ghostty 使用 --working-directory= 显式传入工作目录
@@ -292,6 +292,14 @@ class NautilusMenu(GObject.GObject, Nautilus.MenuProvider):
                 "Ghostty",
                 "/usr/bin/ghostty",
                 "Run in Ghostty",
+                True,
+                [],
+                "--working-directory=",
+            ),
+            (
+                "Kitty",
+                "/usr/bin/kitty",
+                "Run in Kitty",
                 True,
                 [],
                 "--working-directory=",
