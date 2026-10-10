@@ -288,14 +288,14 @@ class NautilusMenu(GObject.GObject, Nautilus.MenuProvider):
             ("VSCode", "/usr/bin/code", "Edit in VSCode", True, ["-n"], None),
             ("Zed", "/usr/bin/zeditor", "Edit in Zed", False, ["-n"], None),
             ("gitg", "/usr/bin/gitg", "Open in gitg", True, [], None),
-            (
-                "Ghostty",
-                "/usr/bin/ghostty",
-                "Run in Ghostty",
-                True,
-                [],
-                "--working-directory=",
-            ),
+            #(
+            #    "Ghostty",
+            #    "/usr/bin/ghostty",
+            #    "Run in Ghostty",
+            #    True,
+            #    [],
+            #    "--working-directory=",
+            #),
             (
                 "Kitty",
                 "/usr/bin/kitty",
@@ -304,14 +304,15 @@ class NautilusMenu(GObject.GObject, Nautilus.MenuProvider):
                 [],
                 "--working-directory=",
             ),
-            (
-                "Warp",
-                "/usr/bin/warp-terminal",
-                "Run in Warp",
-                True,
-                [],
-                "warp://action/new_window?path=",
-            ),
+
+            #(
+            #    "Warp",
+            #    "/usr/bin/warp-terminal",
+            #    "Run in Warp",
+            #    True,
+            #    [],
+            #    "warp://action/new_window?path=",
+            #),
             ("gThumb", "/usr/bin/gthumb", "View in gThumb", True, [], None),
         ]
 
