@@ -83,9 +83,12 @@ if os.environ.get("NAUTILUS_DEBUG", "False") == "True":
 class NautilusMenu(GObject.GObject, Nautilus.MenuProvider):
     """统一的 Nautilus 右键菜单扩展类"""
 
-    _file_items_called = (
-        False  # 类级别标志，避免 get_file_items + get_background_items 重复
-    )
+    # 两个接口的 MenuItem name 分别用 Sel/Bg 前缀区分。
+    # Nautilus 每次刷新扩展菜单都会成对调用 get_file_items(当前选区) +
+    # get_background_items(当前目录)，不加区分的话两处的 name 会生成同名
+    # action（extension_extensions_N_...）互相覆盖，导致菜单项显示重复/错乱。
+    _name_tag_selected = "Sel"
+    _name_tag_background = "Bg"
 
     def __init__(self):
         super().__init__()
@@ -146,25 +149,19 @@ class NautilusMenu(GObject.GObject, Nautilus.MenuProvider):
 
     def get_file_items(self, *args):
         files = args[-1]
-        # 空白处右键时 Nautilus 会先调用 get_file_items([])，
-        # 实际菜单由 get_background_items(当前目录) 提供。
+        # Nautilus 每次刷新扩展菜单都会调用本接口（带当前选区），
+        # 即使这次弹的是背景菜单；空选区时直接返回空列表。
         if not files:
             return []
-
-        NautilusMenu._file_items_called = True
 
         app = Gtk.Application.get_default()
         window = app.get_active_window()
         self.selected_files[window.get_id()] = files
 
-        return self._build_menu_items(files)
+        return self._build_menu_items(files, NautilusMenu._name_tag_selected)
 
     def get_background_items(self, *args):
-        if NautilusMenu._file_items_called:
-            NautilusMenu._file_items_called = False
-            return []
-        NautilusMenu._file_items_called = False
-
+        # 总是为当前目录构建菜单（选区是否非空与此无关）。
         file = args[-1]
 
         app = Gtk.Application.get_default()
@@ -172,25 +169,28 @@ class NautilusMenu(GObject.GObject, Nautilus.MenuProvider):
         if window:
             self.selected_files[window.get_id()] = [file]
 
-        return self._build_menu_items([file])
+        return self._build_menu_items([file], NautilusMenu._name_tag_background)
 
-    def _build_menu_items(self, files):
+    def _build_menu_items(self, files, name_tag):
+        def mkname(key):
+            return f"NautilusMenu::{name_tag}::{key}"
+
         items = []
 
         # ---------- Open in... 子菜单 ----------
         edit_menu = Nautilus.Menu()
         edit_parent = Nautilus.MenuItem(
-            name="NautilusMenu::OpenIn",
+            name=mkname("OpenIn"),
             label="Open in...",
         )
         edit_parent.set_submenu(edit_menu)
 
-        self._add_editor_items(edit_menu, files)
+        self._add_editor_items(edit_menu, files, mkname)
         items.append(edit_parent)
 
         # ---------- Copy 子菜单 ----------
         copy_parent = Nautilus.MenuItem(
-            name="NautilusMenu::Copy",
+            name=mkname("Copy"),
             label="Copy ...",
         )
         copy_menu = Nautilus.Menu()
@@ -207,28 +207,28 @@ class NautilusMenu(GObject.GObject, Nautilus.MenuProvider):
         if plural:
             if self.config["items"]["path"]:
                 p = Nautilus.MenuItem(
-                    name="NautilusMenu::CopyFullName", label="Copy Full Names"
+                    name=mkname("CopyFullName"), label="Copy Full Names"
                 )
                 p.connect("activate", self._copy_paths, files)
                 copy_menu.append_item(p)
 
             if self.config["items"]["name"]:
                 n = Nautilus.MenuItem(
-                    name="NautilusMenu::CopyFileName", label="Copy File Names"
+                    name=mkname("CopyFileName"), label="Copy File Names"
                 )
                 n.connect("activate", self._copy_names, files)
                 copy_menu.append_item(n)
 
             if self.config["items"]["path"]:
                 d = Nautilus.MenuItem(
-                    name="NautilusMenu::CopyDirPath", label="Copy Dir Paths"
+                    name=mkname("CopyDirPath"), label="Copy Dir Paths"
                 )
                 d.connect("activate", self._copy_dirpaths, files)
                 copy_menu.append_item(d)
 
             if self.config["items"]["content"] and filtered_files:
                 c = Nautilus.MenuItem(
-                    name="NautilusMenu::CopyContents", label="Copy Contents"
+                    name=mkname("CopyContents"), label="Copy Contents"
                 )
                 c.connect("activate", self._copy_content, filtered_files)
                 copy_menu.append_item(c)
@@ -238,28 +238,28 @@ class NautilusMenu(GObject.GObject, Nautilus.MenuProvider):
 
             if self.config["items"]["path"]:
                 p = Nautilus.MenuItem(
-                    name="NautilusMenu::CopyFullName", label="Copy Full Name"
+                    name=mkname("CopyFullName"), label="Copy Full Name"
                 )
                 p.connect("activate", self._copy_paths, files)
                 copy_menu.append_item(p)
 
             if self.config["items"]["name"]:
                 n = Nautilus.MenuItem(
-                    name="NautilusMenu::CopyFileName", label="Copy File Name"
+                    name=mkname("CopyFileName"), label="Copy File Name"
                 )
                 n.connect("activate", self._copy_names, files)
                 copy_menu.append_item(n)
 
             if self.config["items"]["path"]:
                 d = Nautilus.MenuItem(
-                    name="NautilusMenu::CopyDirPath", label="Copy Dir Path"
+                    name=mkname("CopyDirPath"), label="Copy Dir Path"
                 )
                 d.connect("activate", self._copy_dirpaths, files)
                 copy_menu.append_item(d)
 
             if self.config["items"]["content"] and filtered_files:
                 c = Nautilus.MenuItem(
-                    name="NautilusMenu::CopyContent", label="Copy Content"
+                    name=mkname("CopyContent"), label="Copy Content"
                 )
                 c.connect("activate", self._copy_content, filtered_files)
                 copy_menu.append_item(c)
@@ -267,7 +267,7 @@ class NautilusMenu(GObject.GObject, Nautilus.MenuProvider):
         items.append(copy_parent)
         return items
 
-    def _add_editor_items(self, menu, files):
+    def _add_editor_items(self, menu, files, mkname):
         if len(files) != 1:
             return
 
@@ -317,7 +317,7 @@ class NautilusMenu(GObject.GObject, Nautilus.MenuProvider):
         ]
 
         for name, cmd, label, open_directory, extra_args, cwd_flag in editors:
-            item = Nautilus.MenuItem(name=f"NautilusMenu::edit_{name}", label=label)
+            item = Nautilus.MenuItem(name=mkname(f"edit_{name}"), label=label)
             item.connect(
                 "activate",
                 self._run_editor,
